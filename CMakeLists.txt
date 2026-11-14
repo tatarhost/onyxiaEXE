@@ -10,7 +10,7 @@ if(MSVC)
     target_compile_options(OnyxiaEXE PRIVATE /W4 /permissive- /utf-8)
     target_link_options(OnyxiaEXE PRIVATE
         "/MANIFEST:EMBED"
-        "/MANIFESTINPUT:\${CMAKE_CURRENT_SOURCE_DIR}/app.manifest"
+        "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/app.manifest"
     )
 endif()
 
