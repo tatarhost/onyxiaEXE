@@ -37,7 +37,7 @@ constexpr COLORREF kText = RGB(24, 49, 73);
 enum ControlId : int {
     ID_NEW = 1001, ID_OPEN, ID_SAVE, ID_SAVE_AS, ID_EXPORT,
     ID_COPY, ID_SCAN, ID_STUDIO, ID_TABS, ID_PROCESS_LIST,
-    ID_PROCESS_INFO, ID_OUTPUT, ID_STATUS, ID_EDITOR
+    ID_PROCESS_INFO, ID_OUTPUT, ID_STATUS, ID_EDITOR, ID_ANALYZE, ID_RUN_LOCAL
 };
 
 struct ProcessEntry {
@@ -463,6 +463,126 @@ void OpenStudio() {
         kTitle, MB_ICONINFORMATION | MB_OK);
 }
 
+
+std::wstring FindLuauTool(const wchar_t* filename) {
+    wchar_t path[32768]{};
+    const DWORD length = SearchPathW(nullptr, filename, nullptr,
+        static_cast<DWORD>(std::size(path)), path, nullptr);
+    if (!length || length >= std::size(path)) return {};
+    return path;
+}
+
+void RunLuauTool(bool analyze) {
+    if (g_activeTab < 0 || g_activeTab >= static_cast<int>(g_scripts.size())) return;
+
+    const wchar_t* toolName = analyze ? L"luau-analyze.exe" : L"luau.exe";
+    const std::wstring toolPath = FindLuauTool(toolName);
+    if (toolPath.empty()) {
+        const wchar_t* message = analyze
+            ? L"luau-analyze.exe was not found on PATH.\nInstall the official Luau CLI tools and restart OnyxiaEXE."
+            : L"luau.exe was not found on PATH.\nInstall the official Luau CLI tools and restart OnyxiaEXE.\n\nThis runs Luau locally; Roblox APIs such as game and workspace exist only inside Studio.";
+        MessageBoxW(g_main, message, kTitle, MB_ICONINFORMATION | MB_OK);
+        Log(std::wstring(toolName) + L" not found on PATH.");
+        return;
+    }
+
+    wchar_t tempDirectory[MAX_PATH]{};
+    if (!GetTempPathW(MAX_PATH, tempDirectory)) {
+        Log(L"Could not locate the Windows temporary directory.");
+        return;
+    }
+    wchar_t tempName[MAX_PATH]{};
+    if (!GetTempFileNameW(tempDirectory, L"ony", 0, tempName)) {
+        Log(L"Could not create a temporary source file.");
+        return;
+    }
+
+    std::filesystem::path sourcePath(tempName);
+    DeleteFileW(sourcePath.c_str());
+    sourcePath.replace_extension(L".lua");
+    const std::filesystem::path outputPath = sourcePath.wstring() + L".log";
+
+    if (!WriteUtf8File(sourcePath.wstring(),
+        GetEditorText(g_scripts[static_cast<size_t>(g_activeTab)].editor))) {
+        Log(L"Could not write temporary Luau source.");
+        return;
+    }
+
+    SECURITY_ATTRIBUTES security{};
+    security.nLength = sizeof(security);
+    security.bInheritHandle = TRUE;
+
+    HANDLE outputFile = CreateFileW(outputPath.c_str(), GENERIC_WRITE,
+        FILE_SHARE_READ, &security, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
+    if (outputFile == INVALID_HANDLE_VALUE) {
+        DeleteFileW(sourcePath.c_str());
+        Log(L"Could not create Luau output capture file.");
+        return;
+    }
+
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    startup.wShowWindow = SW_HIDE;
+    startup.hStdOutput = outputFile;
+    startup.hStdError = outputFile;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+    std::wstring command = L"\"" + toolPath + L"\" \"" + sourcePath.wstring() + L"\"";
+    std::vector<wchar_t> mutableCommand(command.begin(), command.end());
+    mutableCommand.push_back(L'\0');
+
+    PROCESS_INFORMATION process{};
+    const BOOL created = CreateProcessW(toolPath.c_str(), mutableCommand.data(),
+        nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+
+    CloseHandle(outputFile);
+    if (!created) {
+        DeleteFileW(sourcePath.c_str());
+        DeleteFileW(outputPath.c_str());
+        Log(std::wstring(L"Could not start ") + toolName + L". Win32 error: " +
+            std::to_wstring(GetLastError()));
+        return;
+    }
+
+    Log(std::wstring(analyze ? L"Analyzing " : L"Running locally: ") +
+        g_scripts[static_cast<size_t>(g_activeTab)].name);
+
+    const DWORD waitResult = WaitForSingleObject(process.hProcess, 15000);
+    if (waitResult == WAIT_TIMEOUT) {
+        TerminateProcess(process.hProcess, 1);
+        WaitForSingleObject(process.hProcess, 2000);
+        Log(L"Luau tool stopped after the 15-second time limit.");
+    } else if (waitResult == WAIT_OBJECT_0) {
+        DWORD exitCode = 1;
+        GetExitCodeProcess(process.hProcess, &exitCode);
+        Log(L"Luau tool exit code: " + std::to_wstring(exitCode));
+    } else {
+        Log(L"Wait for Luau tool failed.");
+    }
+
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+
+    const std::wstring output = ReadUtf8File(outputPath.wstring());
+    if (output.empty()) Log(L"(no output)");
+    else {
+        size_t start = 0;
+        while (start < output.size()) {
+            const size_t end = output.find_first_of(L"\r\n", start);
+            const std::wstring line = output.substr(start,
+                end == std::wstring::npos ? std::wstring::npos : end - start);
+            if (!line.empty()) Log(line);
+            if (end == std::wstring::npos) break;
+            start = end + 1;
+            while (start < output.size() && (output[start] == L'\r' || output[start] == L'\n')) ++start;
+        }
+    }
+
+    DeleteFileW(sourcePath.c_str());
+    DeleteFileW(outputPath.c_str());
+}
+
 void LayoutChildren(HWND window) {
     RECT rc{};
     GetClientRect(window, &rc);
@@ -519,6 +639,8 @@ void CreateControls(HWND window) {
     AddButton(window, L"Copy to Studio", ID_COPY, 390, 112);
     AddButton(window, L"Scan Roblox", ID_SCAN, 507, 96);
     AddButton(window, L"Open Studio", ID_STUDIO, 608, 96);
+    AddButton(window, L"Analyze Luau", ID_ANALYZE, 709, 96);
+    AddButton(window, L"Run Local", ID_RUN_LOCAL, 810, 88);
 
     g_processList = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
         WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
@@ -652,6 +774,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         else if (id == ID_COPY) CopyCurrentScript();
         else if (id == ID_SCAN) ScanProcesses();
         else if (id == ID_STUDIO) OpenStudio();
+        else if (id == ID_ANALYZE) RunLuauTool(true);
+        else if (id == ID_RUN_LOCAL) RunLuauTool(false);
         else if (id == ID_EDITOR && HIWORD(wParam) == EN_CHANGE && !g_formatting) {
             if (g_activeTab >= 0 && g_activeTab < static_cast<int>(g_scripts.size())) {
                 auto& tab = g_scripts[static_cast<size_t>(g_activeTab)];
