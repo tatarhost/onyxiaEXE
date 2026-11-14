@@ -200,7 +200,7 @@ class OnyxiaApp(tk.Tk):
         )
 
     def _build_ui(self):
-        self._gradient_header(self)
+        self.header = self._gradient_header(self)
 
         toolbar = tk.Frame(self, bg="#e7f0f8", bd=1, relief="raised")
         toolbar.pack(fill="x", padx=10, pady=(8, 7))
