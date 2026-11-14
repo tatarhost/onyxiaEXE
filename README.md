@@ -1,31 +1,32 @@
-# OnyxiaEXE
+# OnyxiaEXE — Native C++ Edition
 
-A Windows 7 Aero-style desktop workbench for Roblox Studio projects.
+A native Windows desktop utility styled after the Windows 7 Aero era.
+
+## Stack
+- C++20
+- Win32 API and native Windows controls
+- Common Controls / Rich Edit
+- CMake + MSVC
 
 ## Features
+- Searches process executable names and resolved executable paths for Roblox.
+- Displays PID, executable name, working-set RAM, and selected executable path.
+- Automatically refreshes the process list.
+- Multi-tab Lua/Luau editor with basic syntax colouring.
+- Open, save, export, and copy Luau source for Roblox Studio.
+- Opens Roblox Studio when installed in the standard local app-data folder.
+- Native Windows executable; no Python runtime or Python packages.
 
-- Searches running Windows processes for `Roblox` in the process name, executable path, or command line.
-- Displays PID, process name, and RAM usage.
-- Refreshes the process list automatically.
-- Multi-tab Lua/Luau editor with basic syntax highlighting.
-- Open, save, export, and copy scripts for use in Roblox Studio.
-- Opens the local Roblox folder and Roblox Studio when installed.
+## Build locally
+Install Visual Studio 2022 Build Tools with the Desktop development with C++ workload and CMake.
 
-## Run from source
+    cmake -S . -B build -A x64
+    cmake --build build --config Release --parallel
 
-Requires Python 3.10+ on Windows.
+Output: build/Release/OnyxiaEXE.exe
 
-```powershell
-py -m pip install -r requirements.txt
-py main.py
-```
+## GitHub Actions
+Every push to main builds a standalone x64 executable. Download artifact OnyxiaEXE-Cpp-Windows-x64 from the completed Build Native Windows EXE workflow.
 
-## Build the EXE
-
-The GitHub Actions workflow **Build Windows EXE** builds a standalone, windowed 64-bit executable on Windows.
-
-It runs on pushes to `main` and can also be started manually from the Actions tab. Download the artifact named **OnyxiaEXE-Windows-x64** from the completed workflow run.
-
-## Scope
-
-Process inspection is read-only. The editor exports Lua/Luau source for Roblox Studio; it does not inject DLLs, modify Roblox process memory, or execute scripts inside the Roblox Player.
+## Runtime scope
+Process inspection is read-only. Luau source is edited and exported for use in Roblox Studio. This project does not inject DLLs into Roblox Player, modify its memory, or execute arbitrary code inside the game client.
